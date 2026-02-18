@@ -1,0 +1,9 @@
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: pdfplumber in C:\Users\7316\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages (0.11.9)
+Requirement already satisfied: pdfminer.six==20251230 in C:\Users\7316\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages (from pdfplumber) (20251230)
+Requirement already satisfied: Pillow>=9.1 in C:\Users\7316\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages (from pdfplumber) (12.1.0)
+Requirement already satisfied: pypdfium2>=4.18.0 in C:\Users\7316\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages (from pdfplumber) (5.3.0)
+Requirement already satisfied: charset-normalizer>=2.0.0 in C:\Users\7316\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages (from pdfminer.six==20251230->pdfplumber) (3.4.4)
+Requirement already satisfied: cryptography>=36.0.0 in C:\Users\7316\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages (from pdfminer.six==20251230->pdfplumber) (46.0.4)
+Requirement already satisfied: cffi>=2.0.0 in C:\Users\7316\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages (from cryptography>=36.0.0->pdfminer.six==20251230->pdfplumber) (2.0.0)
+Requirement already satisfied: pycparser in C:\Users\7316\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages (from cffi>=2.0.0->cryptography>=36.0.0->pdfminer.six==20251230->pdfplumber) (3.0)

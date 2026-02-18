@@ -1,0 +1,69 @@
+name: Run Price Sheet Bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Which command to run'
+        required: true
+        default: 'full-pipeline'
+        type: choice
+        options:
+          - full-pipeline
+          - health-check
+          - certify-all
+          - audit-report
+      community:
+        description: 'Filter by community (optional)'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry run (simulate, no uploads)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Price Sheet Bot
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+          OAUTH_CREDENTIALS_JSON: ${{ secrets.OAUTH_CREDENTIALS_JSON }}
+          OAUTH_USER_TOKEN_JSON: ${{ secrets.OAUTH_USER_TOKEN_JSON }}
+        run: |
+          CMD="python main.py"
+
+          if [ "${{ inputs.command }}" = "health-check" ]; then
+            CMD="$CMD --health-check"
+          elif [ "${{ inputs.command }}" = "certify-all" ]; then
+            CMD="$CMD --certify-all"
+          elif [ "${{ inputs.command }}" = "audit-report" ]; then
+            CMD="$CMD --audit-report"
+          fi
+
+          if [ -n "${{ inputs.community }}" ]; then
+            CMD="$CMD --community '${{ inputs.community }}'"
+          fi
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            CMD="$CMD --dry-run"
+          fi
+
+          echo "Running: $CMD"
+          eval $CMD

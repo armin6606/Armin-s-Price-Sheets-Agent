@@ -1,0 +1,63 @@
+# ============================================================
+# Price Sheet Bot - Configuration
+# ============================================================
+# Fill in YOUR values below. Lines starting with # are comments.
+
+google:
+  # Your Google Spreadsheet ID (the long string in the URL)
+  # Example: https://docs.google.com/spreadsheets/d/THIS_PART_IS_THE_ID/edit
+  spreadsheet_id: "1ax_CoYJVVIl2qfAmok_IBNeE6PsJ1Ku_0kbYvPWdo7U"
+
+  # Path to your service account JSON key file
+  credentials_json_path: "./secrets/service_account.json"
+
+  # Tab names in your Google Sheet
+  control_tab: "CONTROL"
+  mapping_tab: "MAPPING"
+
+drive:
+  enabled: true
+  require_folder_ids: true
+  allow_name_fallback: false
+
+  # Set this ONLY if using a Shared Drive (otherwise leave null)
+  shared_drive_id: null
+
+
+  # Google Drive folder IDs (get from the URL when you open the folder)
+  # Example: https://drive.google.com/drive/folders/THIS_PART_IS_THE_ID
+  templates_folder_id: "1run4sQU9Zm1U9nprpk6_1lBF-aScIejZ"
+  new_releases_folder_id: "1mCxoUkUzbiSzBWxfsJmpkC1ZvLo0qysj"
+  final_price_sheets_folder_id: "1H78zTVFgqBtsuBBjA2jLk4-J1A_01ZHT"
+  sop_folder_id: "1ylsQNRxDN9eIjSvNeZ8we31dKiTcyb4W"
+
+  allow_deletions: false
+  move_processed_pdfs: true
+  keep_originals: true
+  overwrite_drive_files: false
+
+  download_cache_dir: "./cache/downloads"
+  folder_cache_file: "./cache/drive_folders.json"
+  processed_manifest: "./cache/processed_manifest.json"
+
+app:
+  schema_version: 1
+  strict_mode: true
+  poll_interval_seconds: 0
+  dry_run: false
+  skip_unchanged: true
+  remove_invisible_code: true
+  overwrite_existing: false
+  update_only_blank_cells: true
+  allow_price_update_when_filling_blanks: false
+  allow_uncertified_templates: false
+  allow_overwrite_in_production: false
+  default_if_blank: "leave"
+  print_watching_message: true
+
+pdf:
+  enabled: true
+  parse_strategy: "filename_first"
+  require_control_match: false
+  on_unknown_pdf: "quarantine"
+  quarantine_folder_name: "Quarantine"
