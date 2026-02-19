@@ -140,6 +140,19 @@ def _is_totals_row(row: list) -> bool:
     return first in ("TOTALS", "TOTAL")
 
 
+def _is_valid_homesite(hs: str) -> bool:
+    """Check if a homesite value looks like a real homesite number.
+
+    Real homesites are numeric (e.g. '54', '10', '3').
+    Rejects junk like 'Option 1', '$ -', 'Square Footage', '2,013', etc.
+    """
+    if not hs:
+        return False
+    cleaned = hs.strip()
+    # Must be a simple number (digits, maybe with a letter suffix like '10A')
+    return bool(re.match(r"^\d+[A-Za-z]?$", cleaned))
+
+
 def parse_release_pdf(pdf_path: str) -> ParsedReleasePDF:
     """Parse a New Release PDF and extract all homesite data rows.
 
@@ -263,9 +276,15 @@ def parse_release_pdf(pdf_path: str) -> ParsedReleasePDF:
                 default_coe=meta.coe,
             )
 
-            # Validate: must have at least homesite and plan
+            # Validate: must have a real numeric homesite and a plan
             if not hs.homesite or not hs.plan:
                 errors.append(f"Data row {r_idx}: missing homesite or plan, skipping")
+                continue
+            if not _is_valid_homesite(hs.homesite):
+                logger.warning(
+                    "Data row %d: homesite '%s' is not a valid number, skipping (likely PDF footer/summary data)",
+                    r_idx, hs.homesite,
+                )
                 continue
 
             homesites.append(hs)
