@@ -537,16 +537,18 @@ def process_release_pdf(
             "error_count": error_count,
         }
 
-    # Move/copy processed PDF
+    # Move processed PDF to Archive subfolder inside New Releases
     if success_count > 0 and cfg.drive.move_processed_pdfs and not cfg.app.dry_run:
         try:
-            if not cfg.drive.keep_originals:
-                drive_client.move_file(
-                    pdf_id, cfg.drive.final_price_sheets_folder_id,
-                    cfg.drive.new_releases_folder_id,
-                )
+            archive_id = drive_client.ensure_subfolder(
+                cfg.drive.new_releases_folder_id, "Archive"
+            )
+            drive_client.move_file(
+                pdf_id, archive_id, cfg.drive.new_releases_folder_id,
+            )
+            logger.info("Moved processed PDF to New Releases/Archive.")
         except Exception as e:
-            logger.warning("Failed to move processed PDF: %s", e)
+            logger.warning("Failed to move processed PDF to Archive: %s", e)
 
     result["output_ids"] = all_output_ids
     result["homesite_results"].extend(errors_per_hs)
@@ -749,10 +751,13 @@ def process_single_pdf(
 
     if cfg.drive.move_processed_pdfs:
         try:
-            if not cfg.drive.keep_originals:
-                drive_client.move_file(pdf_id, final_folder, cfg.drive.new_releases_folder_id)
+            archive_id = drive_client.ensure_subfolder(
+                cfg.drive.new_releases_folder_id, "Archive"
+            )
+            drive_client.move_file(pdf_id, archive_id, cfg.drive.new_releases_folder_id)
+            logger.info("Moved processed PDF to New Releases/Archive.")
         except Exception as e:
-            logger.warning("Failed to move processed PDF: %s", e)
+            logger.warning("Failed to move processed PDF to Archive: %s", e)
 
     result["status"] = "success"
     result["details"] = f"{write_result.action} at row {write_result.row_index + 1}"
