@@ -1680,6 +1680,18 @@ def run_health_check(cfg: Config):
         print("    FAIL: pdfplumber not installed. Run: pip install pdfplumber")
         all_ok = False
 
+    # 7. PDF export method
+    print("[7] Checking PDF export (DOCX→PDF conversion)...")
+    from .pdf_export import _find_libreoffice
+    lo_path = _find_libreoffice()
+    if lo_path:
+        print(f"    OK: LibreOffice found ({lo_path}). Will use for PDF conversion.")
+        print("    (LibreOffice preserves page borders, images, and positioning.)")
+    else:
+        print("    WARN: LibreOffice not found. Will fall back to Google Drive conversion.")
+        print("    (Google Drive may corrupt page borders, duplicate images, and displace elements.)")
+        print("    Install LibreOffice for best results: sudo apt install libreoffice-writer")
+
     print()
     if all_ok:
         print("Health check PASSED. All systems operational.")
