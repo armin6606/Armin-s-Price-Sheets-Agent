@@ -1056,6 +1056,17 @@ def sync_control_to_templates(
         any_changes = False
         deletion_detected = False
 
+        # Check 0: Was the blank template modified after the final file?
+        # (User changed design/layout/first page — need to rebuild even if data unchanged)
+        template_mtime = original_template.get("modifiedTime", "")
+        final_mtime = final_file.get("modifiedTime", "") if final_file else ""
+        if template_mtime and final_mtime and template_mtime > final_mtime:
+            any_changes = True
+            logger.info(
+                "Template '%s' was modified (%s) after final file (%s). Will rebuild.",
+                template_name, template_mtime, final_mtime,
+            )
+
         # Build a set of all homesite keys currently in CONTROL for this template
         control_hs_keys = set()
         for ic, fp_data in fp_groups.items():
