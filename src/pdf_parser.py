@@ -198,19 +198,79 @@ def parse_release_pdf(pdf_path: str) -> ParsedReleasePDF:
             meta.community, meta.phase, meta.release_date, meta.coe,
         )
 
-        # ── Parse core homesite rows from Table 2 ──
-        # Table 2 has: Row 0 = headers, Row 1..N-1 = data, Row N = TOTALS
-        core_table = tables[2] if len(tables) > 2 else []
+        # ── Find the core homesite table (the one with HS # column) ──
+        # Some PDFs have core data in Table 1 (merged with premiums),
+        # others have it in Table 2.  Detect by looking for "HS" header.
+        core_table_idx = None
+        core_header_row = None
+        hs_col = 1  # default column for homesite number
+        for t_idx in range(1, len(tables)):
+            tbl = tables[t_idx]
+            # Check first 2 rows for a header containing "HS"
+            for r_idx in range(min(2, len(tbl))):
+                row = tbl[r_idx]
+                for c_idx, cell in enumerate(row):
+                    if cell and re.search(r"\bHS\b", str(cell), re.IGNORECASE):
+                        core_table_idx = t_idx
+                        core_header_row = r_idx
+                        hs_col = c_idx
+                        break
+                if core_table_idx is not None:
+                    break
+            if core_table_idx is not None:
+                break
+
+        if core_table_idx is None:
+            # Fallback: assume Table 2 like before
+            logger.warning("Could not find HS# header; falling back to Table 2")
+            core_table_idx = 2
+            core_header_row = 0
+            hs_col = 1
+
+        core_table = tables[core_table_idx] if len(tables) > core_table_idx else []
         if not core_table or len(core_table) < 2:
             return ParsedReleasePDF(
                 meta=meta, homesites=[], filename=filename,
-                errors=errors + ["Core table (table 2) is empty or too small"],
+                errors=errors + [f"Core table (table {core_table_idx}) is empty or too small"],
             )
 
-        # Determine data row count (skip header row 0 and TOTALS row at end)
+        logger.info(
+            "Core homesite table: table[%d], header row %d, HS# in col %d",
+            core_table_idx, core_header_row, hs_col,
+        )
+
+        # Detect column layout from the header row
+        header = core_table[core_header_row]
+        col_map = {}  # Maps logical name -> column index
+        for c_idx, cell in enumerate(header):
+            if not cell:
+                continue
+            cell_upper = str(cell).strip().upper()
+            if "COE" in cell_upper:
+                col_map["coe"] = c_idx
+            elif cell_upper in ("HS #", "HS", "HS#"):
+                col_map["hs"] = c_idx
+            elif cell_upper in ("PLAN", "PLAN #"):
+                col_map["plan"] = c_idx
+            elif "ELEV" in cell_upper:
+                col_map["elev"] = c_idx
+            elif "BASE" in cell_upper:
+                col_map["base"] = c_idx
+        # Ensure defaults if not found
+        col_map.setdefault("coe", 0)
+        col_map.setdefault("hs", hs_col)
+        col_map.setdefault("plan", 2)
+        col_map.setdefault("elev", 3)
+        col_map.setdefault("base", 4)
+
+        # Determine data rows (after header, before TOTALS)
         data_rows = []
-        for r_idx in range(1, len(core_table)):
+        for r_idx in range(core_header_row + 1, len(core_table)):
             if _is_totals_row(core_table[r_idx]):
+                break
+            # Skip completely empty rows
+            row_vals = [str(c or "").strip() for c in core_table[r_idx]]
+            if not any(row_vals):
                 break
             data_rows.append(r_idx)
 
@@ -223,52 +283,77 @@ def parse_release_pdf(pdf_path: str) -> ParsedReleasePDF:
 
         logger.info("Found %d homesite data rows in PDF.", num_data)
 
-        # ── Extract premium table (Table 3) ──
-        premium_table = tables[3] if len(tables) > 3 else []
-        # Table 3 headers: Elevation, HS-Size, Detached, Corner, Location/View, Premium Total
+        # ── Identify remaining tables by header keywords ──
+        # After the core table, locate Options, Released Price, NRCC, Net Price
+        options_table = []
+        released_table = []
+        nrcc_table = []
+        net_table = []
 
-        # ── Extract options table (Table 4) ──
-        options_table = tables[4] if len(tables) > 4 else []
-        # Table 4 headers: Increase, Option 1, Option 2, Option Total
+        for t_idx in range(len(tables)):
+            if t_idx == 0 or t_idx == core_table_idx:
+                continue
+            tbl = tables[t_idx]
+            if not tbl or not tbl[0]:
+                continue
+            # Check first 2 rows for identifying keywords
+            header_text = " ".join(str(c or "") for row in tbl[:2] for c in row).upper()
+            if "OPTION" in header_text and "INCREASE" in header_text and not options_table:
+                options_table = tbl
+            elif "TOTAL" in header_text and "RELEASED" in header_text and not released_table:
+                released_table = tbl
+            elif "NRCC" in header_text and not nrcc_table:
+                nrcc_table = tbl
+            elif "NET PRICE" in header_text and not net_table:
+                net_table = tbl
 
-        # ── Extract Total Released Price (Table 5) ──
-        released_table = tables[5] if len(tables) > 5 else []
+        # The row offset for companion tables: they share the same row alignment
+        # Data starts after their own header rows.  We'll map by data row index.
+        def _companion_data_start(tbl):
+            """Find the first data row in a companion table (after its header)."""
+            for r in range(min(2, len(tbl))):
+                # If a row has a dollar value, that's data
+                for c in tbl[r]:
+                    if c and "$" in str(c):
+                        return r
+            return 1  # default: row 1
 
-        # ── Extract NRCC / Price Change (Table 6) ──
-        nrcc_table = tables[6] if len(tables) > 6 else []
-        # Table 6: NRCC, (blank), Total Price Change
-
-        # ── Extract Net Price (Table 7) ──
-        net_table = tables[7] if len(tables) > 7 else []
+        opt_start = _companion_data_start(options_table) if options_table else 1
+        rel_start = _companion_data_start(released_table) if released_table else 1
+        nrcc_start = _companion_data_start(nrcc_table) if nrcc_table else 1
+        net_start = _companion_data_start(net_table) if net_table else 1
 
         # ── Build homesite objects ──
         homesites = []
         for i, r_idx in enumerate(data_rows):
+            # Map companion table row index from data row order
+            opt_r = opt_start + i
+            rel_r = rel_start + i
+            nrcc_r = nrcc_start + i
+            net_r = net_start + i
+
             hs = ReleaseHomesite(
-                coe_date=_safe_get(core_table, r_idx, 0),
-                homesite=_safe_get(core_table, r_idx, 1),
-                plan=_safe_get(core_table, r_idx, 2),
-                plan_elev=_safe_get(core_table, r_idx, 3),
-                base_price=_clean_price(_safe_get(core_table, r_idx, 4)),
-                # Premiums (table 3, same row offset: header=0, data starts at 1)
-                elevation_premium=_clean_price(_safe_get(premium_table, r_idx, 0)),
-                hs_size_premium=_clean_price(_safe_get(premium_table, r_idx, 1)),
-                detached_premium=_clean_price(_safe_get(premium_table, r_idx, 2)),
-                corner_premium=_clean_price(_safe_get(premium_table, r_idx, 3)),
-                location_view_premium=_clean_price(_safe_get(premium_table, r_idx, 4)),
-                premium_total=_clean_price(_safe_get(premium_table, r_idx, 5)),
-                # Options (table 4, same row offset)
-                price_adj_increase=_clean_price(_safe_get(options_table, r_idx, 0)),
-                option_1=_clean_price(_safe_get(options_table, r_idx, 1)),
-                option_2=_clean_price(_safe_get(options_table, r_idx, 2)),
-                option_total=_clean_price(_safe_get(options_table, r_idx, 3)),
-                # Total Released Price (table 5)
-                total_released_price=_clean_price(_safe_get(released_table, r_idx, 0)),
-                # NRCC and Price Change (table 6)
-                nrcc=_clean_price(_safe_get(nrcc_table, r_idx, 0)),
-                total_price_change=_clean_price(_safe_get(nrcc_table, r_idx, 2) if len(nrcc_table) > r_idx and len(nrcc_table[r_idx]) > 2 else ""),
-                # Net Price (table 7)
-                net_price=_clean_price(_safe_get(net_table, r_idx, 0)),
+                coe_date=_safe_get(core_table, r_idx, col_map["coe"]),
+                homesite=_safe_get(core_table, r_idx, col_map["hs"]),
+                plan=_safe_get(core_table, r_idx, col_map["plan"]),
+                plan_elev=_safe_get(core_table, r_idx, col_map["elev"]),
+                base_price=_clean_price(_safe_get(core_table, r_idx, col_map["base"])),
+                # Options
+                price_adj_increase=_clean_price(_safe_get(options_table, opt_r, 0)),
+                option_1=_clean_price(_safe_get(options_table, opt_r, 1)),
+                option_2=_clean_price(_safe_get(options_table, opt_r, 2)),
+                option_total=_clean_price(_safe_get(options_table, opt_r, 3)),
+                # Total Released Price
+                total_released_price=_clean_price(_safe_get(released_table, rel_r, 0)),
+                # NRCC and Price Change
+                nrcc=_clean_price(_safe_get(nrcc_table, nrcc_r, 0)),
+                total_price_change=_clean_price(
+                    _safe_get(nrcc_table, nrcc_r, 2)
+                    if len(nrcc_table) > nrcc_r and len(nrcc_table[nrcc_r]) > 2
+                    else _safe_get(nrcc_table, nrcc_r, 1)
+                ),
+                # Net Price
+                net_price=_clean_price(_safe_get(net_table, net_r, 0)),
                 # Metadata
                 community=meta.community,
                 phase=meta.phase,
