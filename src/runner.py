@@ -1454,8 +1454,11 @@ def run_master(
     if sheet_sync["errors"] > 0:
         print(f"  WARNING: {sheet_sync['errors']} error(s) during sync.")
 
-    # ── Step 6: Process new PDFs -> write to templates + upload ──
-    print(f"\n[STEP 6/7] Writing new PDFs to templates and generating output files")
+    # ── Step 6: Archive processed PDFs and handle legacy single-PDF format ──
+    # Release PDFs are already handled: Step 3 parsed them into CONTROL,
+    # Step 5 synced CONTROL to templates. We just need to archive them
+    # and handle any legacy single-homesite PDFs.
+    print(f"\n[STEP 6/7] Archiving processed PDFs")
     print("-" * 40)
 
     processed_count = 0
@@ -1464,48 +1467,81 @@ def run_master(
     if not new_pdfs:
         print("  No new PDFs to process.")
     else:
-        if not acquire_lock():
-            print("  ERROR: Could not acquire process lock.")
-            return
+        manifest = load_manifest(cfg.drive.processed_manifest)
 
-        try:
-            # Reuse control_rows and mapping_rows_fresh from Step 5
-            manifest = load_manifest(cfg.drive.processed_manifest)
+        for pdf_file in new_pdfs:
+            if is_already_processed(pdf_file, manifest):
+                continue
 
-            for pdf_file in new_pdfs:
-                if is_already_processed(pdf_file, manifest):
-                    continue
+            pdf_name = pdf_file["name"]
+            pdf_id = pdf_file["id"]
 
-                if _is_release_pdf(pdf_file["name"]):
-                    result = process_release_pdf(
-                        cfg, drive, sheets, control_rows, mapping_rows_fresh,
-                        pdf_file, manifest, certs,
-                        overwrite_existing_override=overwrite_existing_override,
-                        homesite_filter=homesite_filter,
-                        floorplan_filter=floorplan_filter,
-                    )
+            if _is_release_pdf(pdf_name):
+                # Release PDFs were already parsed in Step 3 and synced in Step 5.
+                # Just mark as processed and move to Archive.
+                parsed = pdf_parse_results.get(pdf_id)
+                hs_count = len(parsed.homesites) if parsed else 0
+
+                if hs_count > 0 and not cfg.app.dry_run:
+                    try:
+                        drive.set_app_properties(pdf_id, {
+                            "processed": "true",
+                            "processed_at": datetime.now(timezone.utc).isoformat(),
+                            "community": parsed.meta.community if parsed else "",
+                            "phase": parsed.meta.phase if parsed else "",
+                            "homesite_count": str(hs_count),
+                        })
+                    except Exception as e:
+                        logger.warning("Failed to set appProperties on PDF: %s", e)
+
+                    manifest[pdf_id] = {
+                        "name": pdf_name,
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                        "community": parsed.meta.community if parsed else "",
+                        "phase": parsed.meta.phase if parsed else "",
+                        "homesite_count": hs_count,
+                        "error_count": 0,
+                    }
+
+                    # Move to Archive
+                    if cfg.drive.move_processed_pdfs:
+                        try:
+                            archive_id = drive.ensure_subfolder(
+                                cfg.drive.new_releases_folder_id, "Archive"
+                            )
+                            drive.move_file(pdf_id, archive_id, cfg.drive.new_releases_folder_id)
+                            logger.info("Moved processed PDF '%s' to New Releases/Archive.", pdf_name)
+                        except Exception as e:
+                            logger.warning("Failed to move PDF to Archive: %s", e)
+
+                    processed_count += 1
+                    print(f"  OK: {pdf_name} -> {hs_count} homesite(s) via CONTROL sync")
                 else:
+                    print(f"  SKIP: {pdf_name} -> no valid homesites found")
+
+            else:
+                # Legacy single-homesite PDF format - process directly
+                if not acquire_lock():
+                    print("  ERROR: Could not acquire process lock.")
+                    break
+                try:
                     result = process_single_pdf(
                         cfg, drive, sheets, control_rows, mapping_rows_fresh,
                         pdf_file, manifest, certs, overwrite_existing_override,
                     )
+                    status = result["status"]
+                    if status in ("success", "partial"):
+                        processed_count += 1
+                        print(f"  OK: {pdf_name} -> {result['details']}")
+                    elif status == "error":
+                        error_count += 1
+                        print(f"  ERROR: {pdf_name} -> {result['details']}")
+                    else:
+                        print(f"  {status}: {pdf_name} -> {result['details']}")
+                finally:
+                    release_lock()
 
-                status = result["status"]
-                if status in ("success", "partial"):
-                    processed_count += 1
-                    print(f"  OK: {pdf_file['name']} -> {result['details']}")
-                elif status == "error":
-                    error_count += 1
-                    print(f"  ERROR: {pdf_file['name']} -> {result['details']}")
-                elif status == "dry_run":
-                    print(f"  [DRY RUN]: {pdf_file['name']} -> {result['details']}")
-                else:
-                    print(f"  {status}: {pdf_file['name']} -> {result['details']}")
-
-                save_manifest(cfg.drive.processed_manifest, manifest)
-
-        finally:
-            release_lock()
+            save_manifest(cfg.drive.processed_manifest, manifest)
 
     # ── Step 7: Summary ──
     print(f"\n[STEP 7/7] Summary")
