@@ -116,6 +116,7 @@ def is_already_processed(pdf_file: dict, manifest: dict) -> bool:
 # ── Template Certification ──
 
 CERT_FILE = "./cache/certified_templates.json"
+BUILD_STATE_FILE = "./cache/build_state.json"
 
 
 def load_certifications() -> dict:
@@ -135,6 +136,21 @@ def is_template_certified(file_id: str, modified_time: str, certs: dict) -> bool
     if file_id not in certs:
         return False
     return certs[file_id].get("modifiedTime") == modified_time
+
+
+# ── Build State (tracks template version used for each build) ──
+
+def load_build_state() -> dict:
+    if os.path.exists(BUILD_STATE_FILE):
+        with open(BUILD_STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_build_state(state: dict):
+    os.makedirs(os.path.dirname(BUILD_STATE_FILE), exist_ok=True)
+    with open(BUILD_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, default=str)
 
 
 # ── Quarantine ──
@@ -963,6 +979,7 @@ def sync_control_to_templates(
         return result
 
     cfg.ensure_cache_dirs()
+    build_state = load_build_state()
 
     # SOP address resolution cache to avoid re-resolving the same homesite
     _sop_cache = {}  # (community, homesite) -> address or ""
@@ -1056,15 +1073,17 @@ def sync_control_to_templates(
         any_changes = False
         deletion_detected = False
 
-        # Check 0: Was the blank template modified after the final file?
+        # Check 0: Has the blank template been modified since the last build?
         # (User changed design/layout/first page — need to rebuild even if data unchanged)
+        # We track the template modifiedTime that was used for the last successful build
+        # in build_state, and compare against the template's current modifiedTime.
         template_mtime = original_template.get("modifiedTime", "")
-        final_mtime = final_file.get("modifiedTime", "") if final_file else ""
-        if template_mtime and final_mtime and template_mtime > final_mtime:
+        last_build_mtime = build_state.get(template_name, {}).get("template_modifiedTime", "")
+        if template_mtime and template_mtime != last_build_mtime:
             any_changes = True
             logger.info(
-                "Template '%s' was modified (%s) after final file (%s). Will rebuild.",
-                template_name, template_mtime, final_mtime,
+                "Template '%s' design changed (template mtime=%s, last build used=%s). Will rebuild.",
+                template_name, template_mtime, last_build_mtime or "(never built)",
             )
 
         # Build a set of all homesite keys currently in CONTROL for this template
@@ -1205,6 +1224,16 @@ def sync_control_to_templates(
 
             result["templates_updated"] += 1
             result["rows_synced"] += rows_written
+
+            # Record the template modifiedTime used for this build so we can
+            # detect future template design changes accurately.
+            build_state[template_name] = {
+                "template_modifiedTime": template_mtime,
+                "built_at": datetime.now(timezone.utc).isoformat(),
+                "rows_written": rows_written,
+            }
+            save_build_state(build_state)
+
             if deletion_detected:
                 print(f"  Updated '{template_name}': {rows_written} row(s), "
                       f"removed deleted rows from template")
