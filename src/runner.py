@@ -36,6 +36,7 @@ from .utils import (
     format_price, parse_ready_by,
 )
 from .logging_setup import log_event
+from .agent_sync import AgentSync
 
 logger = logging.getLogger("price_sheet_bot.runner")
 
@@ -1296,6 +1297,17 @@ def run_master(
     drive.connect_for_writes()
     cfg.ensure_cache_dirs()
 
+    # Connect agent coordination (shared status sheet with map agent)
+    agent_sync = None
+    try:
+        agent_sync = AgentSync(cfg.google.credentials_json_path)
+        agent_sync.connect()
+        print("  [SYNC] Connected to agent_status sheet.")
+    except Exception as e:
+        print(f"  [SYNC] WARNING: Could not connect to agent_status sheet: {e}")
+        print("  [SYNC] Will proceed WITHOUT agent coordination.")
+        agent_sync = None
+
     mapping_records = sheets.get_all_records(cfg.google.mapping_tab)
     mapping_rows = parse_mapping_tab(mapping_records)
 
@@ -1330,6 +1342,14 @@ def run_master(
     # New PDFs feed INTO the CONTROL sheet. The sheet is the authority.
     print(f"\n[STEP 3/7] Parsing PDFs, resolving addresses, updating Google Sheet")
     print("-" * 40)
+
+    # Signal map agent: we're about to work on the CONTROL sheet
+    if agent_sync:
+        # Safety: don't write while map agent is working
+        if not agent_sync.check_map_agent_not_working():
+            print("  [SYNC] map_agent is WORKING. Waiting for it to finish...")
+            agent_sync.wait_for_map_agent(poll_interval=10, timeout=300)
+        agent_sync.set_pricing_working(note="Starting CONTROL sheet updates")
 
     all_homesites = []  # List of (pdf_file, ReleaseHomesite) tuples
     pdf_parse_results = {}  # pdf_id -> ParsedReleasePDF
@@ -1461,12 +1481,29 @@ def run_master(
     except Exception as e:
         print(f"  WARNING: SOP address resolution failed: {e}")
 
+    # Signal map agent: CONTROL updates are complete, you can run now.
+    # Always signal DONE so the map agent runs even if no new PDFs were parsed
+    # (the user may have manually edited CONTROL, or maps may need refreshing).
+    if agent_sync:
+        agent_sync.set_pricing_done(
+            note=f"CONTROL updates complete. {pdf_sheet_count} rows from PDFs."
+        )
+
     # ── Step 4: Certify all templates ──
     print(f"\n[STEP 4/7] Certifying templates")
     print("-" * 40)
     cert_ok, cert_total, cert_pass, cert_fail = run_certify_all(cfg, sheets=sheets, drive=drive)
     if cert_fail > 0:
         print(f"  WARNING: {cert_fail} template(s) failed certification (will be skipped).")
+
+    # ── Wait for map agent to finish coloring maps in templates ──
+    if agent_sync:
+        print(f"\n[STEP 4b] Waiting for map agent to update maps in templates")
+        print("-" * 40)
+        map_done = agent_sync.wait_for_map_agent(poll_interval=15, timeout=600)
+        if not map_done:
+            print("  [SYNC] Map agent did not finish in time. Proceeding anyway.")
+            print("  [SYNC] WARNING: Final PDFs may not have updated maps.")
 
     # ── Step 5: Sync CONTROL sheet -> templates ──
     # The CONTROL sheet is the single source of truth.
@@ -1592,6 +1629,14 @@ def run_master(
           f"{sheet_sync['rows_synced']} row(s)")
     print(f"  PDFs processed:          {processed_count}")
     print(f"  Errors:                  {error_count}")
+
+    # Reset agent statuses after everything is done
+    if agent_sync:
+        try:
+            agent_sync.reset_map_agent(note="PDF export complete. Reset by pricing agent.")
+            agent_sync.set_pricing_idle(note="Pipeline complete.")
+        except Exception as e:
+            print(f"  [SYNC] WARNING: Could not reset agent statuses: {e}")
 
     print("\n" + "=" * 60)
     print("  ALL DONE!")
