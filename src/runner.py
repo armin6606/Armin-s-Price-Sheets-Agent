@@ -793,7 +793,7 @@ def _is_release_pdf(filename: str) -> bool:
     """
     parsed = parse_release_filename(filename)
     if parsed and parsed.get("phase"):
-        return True  # Has a phase component → release format
+        return True  # Has a phase component -> release format
     return False
 
 
@@ -1726,7 +1726,7 @@ def run_health_check(cfg: Config):
         all_ok = False
 
     # 7. PDF export method
-    print("[7] Checking PDF export (DOCX→PDF conversion)...")
+    print("[7] Checking PDF export (DOCX->PDF conversion)...")
     from .pdf_export import _find_libreoffice
     lo_path = _find_libreoffice()
     if lo_path:
