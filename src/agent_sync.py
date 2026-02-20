@@ -127,15 +127,21 @@ class AgentSync:
         self,
         poll_interval: int = DEFAULT_POLL_INTERVAL,
         timeout: int = DEFAULT_TIMEOUT,
+        idle_grace: int = 60,
     ) -> bool:
         """Poll until map_agent status = DONE, then return True.
 
-        Returns False if timeout is reached.
+        If map_agent stays IDLE for longer than idle_grace seconds, it means
+        the map agent is not running/watching. In that case, skip the wait
+        and proceed (so the pipeline doesn't hang).
+
+        Returns False if timeout or idle grace is reached.
         """
         print(f"\n  [SYNC] Waiting for map agent to finish (polling every {poll_interval}s, "
               f"timeout {timeout}s)...")
         start = time.time()
         last_status = ""
+        idle_since = None  # Track how long map_agent has been IDLE
 
         while True:
             elapsed = time.time() - start
@@ -153,6 +159,22 @@ class AgentSync:
             if status == DONE:
                 print(f"  [SYNC] Map agent is DONE! Proceeding with PDF export.")
                 return True
+
+            if status == WORKING:
+                # Map agent picked up the signal and is working — reset idle timer
+                idle_since = None
+            elif status == IDLE:
+                # Map agent hasn't picked up the signal yet
+                if idle_since is None:
+                    idle_since = time.time()
+                elif time.time() - idle_since >= idle_grace:
+                    print(f"  [SYNC] Map agent still IDLE after {idle_grace}s — "
+                          f"it may not be running. Proceeding without maps.")
+                    logger.warning(
+                        "Map agent stayed IDLE for %ds. Proceeding without waiting.",
+                        idle_grace,
+                    )
+                    return False
 
             time.sleep(poll_interval)
 
