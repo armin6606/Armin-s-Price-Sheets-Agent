@@ -35,6 +35,8 @@ _COMMUNITY_PATTERNS = [
     re.compile(r"^\d*\s*([A-Za-z ]+?)\s*\(", re.IGNORECASE),
     # "SIGNED LENNAR Schedule of Properties Nova AQ12 Phase 2 ..." → Nova
     re.compile(r"Schedule of Properties\s+([A-Za-z]+)", re.IGNORECASE),
+    # "Sella SOP - Phase 8 - 11.6.24 - signed.pdf" → Sella
+    re.compile(r"^([A-Za-z ]+?)\s+SOP\b", re.IGNORECASE),
     # "STRATA_(AQ22)_SOP_PH2..." → STRATA
     re.compile(r"^([A-Za-z ]+?)[\s_]*\(", re.IGNORECASE),
 ]

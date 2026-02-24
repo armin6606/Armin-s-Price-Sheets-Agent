@@ -38,11 +38,17 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install LibreOffice (for DOCX→PDF conversion)
+      - name: Install LibreOffice + Microsoft fonts (for DOCX->PDF conversion)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libreoffice-writer >/dev/null 2>&1
+          # Accept EULA for Microsoft fonts non-interactively
+          echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | sudo debconf-set-selections
+          sudo apt-get install -y -qq libreoffice-writer ttf-mscorefonts-installer fontconfig >/dev/null 2>&1
+          # Rebuild font cache so LibreOffice picks up the new fonts
+          sudo fc-cache -f -v >/dev/null 2>&1
           soffice --version
+          echo "Microsoft fonts installed:"
+          fc-list | grep -i "arial\|calibri\|times\|verdana" | head -5 || echo "  (font list check)"
 
       - name: Install dependencies
         run: pip install -r requirements.txt

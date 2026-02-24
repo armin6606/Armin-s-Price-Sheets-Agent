@@ -1156,6 +1156,13 @@ def sync_control_to_templates(
         with open(blank_cache_path, "rb") as f:
             current_bytes = f.read()
 
+        # Get the template's expected PDF page count for validation
+        from .pdf_export import _count_pdf_pages, export_pdf_via_word, export_pdf_via_libreoffice
+        _ref_pdf = export_pdf_via_word(current_bytes) or export_pdf_via_libreoffice(current_bytes)
+        _expected_pages = _count_pdf_pages(_ref_pdf) if _ref_pdf else 0
+        if _expected_pages > 0:
+            logger.info("Template '%s' reference PDF has %d page(s).", template_name, _expected_pages)
+
         total_rows = sum(len(fp["control_rows"]) for fp in fp_groups.values())
         logger.info(
             "Sheet->template sync: rebuilding '%s' from blank template "
@@ -1211,6 +1218,7 @@ def sync_control_to_templates(
                 drive_client, current_bytes,
                 cfg.drive.final_price_sheets_folder_id,
                 temp_name=f"_sync_{base_name}",
+                expected_pages=_expected_pages,
             )
 
             final_folder = cfg.drive.final_price_sheets_folder_id
@@ -1727,15 +1735,38 @@ def run_health_check(cfg: Config):
 
     # 7. PDF export method
     print("[7] Checking PDF export (DOCX->PDF conversion)...")
-    from .pdf_export import _find_libreoffice
+    from .pdf_export import _find_word, _find_libreoffice
+    word_path = _find_word()
     lo_path = _find_libreoffice()
-    if lo_path:
+
+    if word_path:
+        print(f"    OK: Microsoft Word found ({word_path}).")
+        print("    Will use Word COM for pixel-perfect PDF conversion.")
+        # Check COM library availability
+        com_lib = None
+        try:
+            import comtypes.client  # noqa: F401
+            com_lib = "comtypes"
+        except ImportError:
+            try:
+                import win32com.client  # noqa: F401
+                com_lib = "pywin32"
+            except ImportError:
+                pass
+        if com_lib:
+            print(f"    OK: COM library available ({com_lib}).")
+        else:
+            print("    WARN: No COM library found (comtypes or pywin32).")
+            print("    Install one: pip install comtypes")
+            if lo_path:
+                print(f"    Will fall back to LibreOffice ({lo_path}).")
+    elif lo_path:
         print(f"    OK: LibreOffice found ({lo_path}). Will use for PDF conversion.")
-        print("    (LibreOffice preserves page borders, images, and positioning.)")
+        print("    (Good quality, but minor table style differences vs Word.)")
     else:
-        print("    WARN: LibreOffice not found. Will fall back to Google Drive conversion.")
-        print("    (Google Drive may corrupt page borders, duplicate images, and displace elements.)")
-        print("    Install LibreOffice for best results: sudo apt install libreoffice-writer")
+        print("    WARN: Neither Word nor LibreOffice found.")
+        print("    Will fall back to Google Drive conversion (may corrupt formatting).")
+        print("    Install LibreOffice for better results: sudo apt install libreoffice-writer")
 
     print()
     if all_ok:
