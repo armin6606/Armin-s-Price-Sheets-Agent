@@ -1,0 +1,18 @@
+name: Run Bot (Local PC)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-bot-local:
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: C:\Price Sheets Agent
+
+    steps:
+      - name: Run Price Sheet Bot
+        run: python main.py
+        shell: cmd
